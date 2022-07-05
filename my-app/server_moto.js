@@ -1,14 +1,35 @@
 const crypto = require('crypto');
 const express = require('express');
+const session = require('express-session');
 const app = express();
 const bodyParser = require('body-parser');
 app.use(bodyParser.urlencoded({ extended: true })); 
 const mysql = require('mysql')
+const DynamoDBStore = require('connect-dynamodb')({session: session})
+app.use('/', session({
+  name: 'login.session',
+  secret: 'keyboard cat',
+  resave: false,
+  saveUninitialized: true,
+  cookie: { path: '/', secure: false },
+  store: new DynamoDBStore({
+    table: 'session-table'
+  })
+}))
 
 //初期ページ読み込み
+
+
+
+app.set('view engine', 'ejs')
 app.get('/', (req, res) => {
-  res.render('hoge.ejs',{name:" "});
-});
+  if (req.session.user) {
+    const user = req.session.user
+    res.render('index.ejs',{name: "hi! " + user.name});
+  } else {
+    res.render('hoge.ejs',{name:" "});
+  }
+})
 
 //ID pass読み取り
 app.post("/top", (req,res)=>{
@@ -36,7 +57,11 @@ app.post("/top", (req,res)=>{
       if(id==results[i].user_id){   
          //ログイン処理 ユーザ1は123　ユーザー２はabc
         if(id==results[i].user_id && angou==results[i].password){
-          res.render('hoge.ejs',{name: "hi! " + results[i].name});
+          req.session.user={
+            user_id:results[i].user_id,
+            name:results[i].name
+          }
+          res.render('index.ejs',{name: "hi! " + results[i].name});
        }else{
             res.render('hoge.ejs',{name: "id又はパスワードが間違っています"});
        }
@@ -45,5 +70,6 @@ app.post("/top", (req,res)=>{
   })
   connection.end()
 });
-      
+
 app.listen(8080);
+
