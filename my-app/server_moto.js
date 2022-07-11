@@ -1,14 +1,63 @@
 const crypto = require('crypto');
 const express = require('express');
+const session = require('express-session');
 const app = express();
 const bodyParser = require('body-parser');
 app.use(bodyParser.urlencoded({ extended: true })); 
 const mysql = require('mysql')
+const { S3, ListObjectsCommand ,GetObjectCommand } = require('@aws-sdk/client-s3');
+const fs = require('fs')
+const path = require('path')
+const { render } = require('ejs');
+const DynamoDBStore = require('connect-dynamodb')({session: session})
+const client = new S3()
+
+
+app.use('/', session({
+  name: 'login.session',
+  secret: 'keyboard cat',
+  resave: false,
+  saveUninitialized: true,
+  cookie: { path: '/', secure: false },
+  store: new DynamoDBStore({
+    table: 'session-table'
+  })
+}))
 
 //初期ページ読み込み
+
+app.set('view engine', 'ejs')
 app.get('/', (req, res) => {
-  res.render('hoge.ejs',{name:" "});
-});
+  if (req.session.user) {
+    const user = req.session.user
+    client.send(new ListObjectsCommand({ Bucket: 'gazouserver' }))
+            .then(data => {
+              const syousai = data.Contents.map(o => {return{ namae: o.Key, size: o.Size}})
+              res.render('index.ejs',{
+                id:syousai,
+                name: "hi! " + user.name
+              })
+            })
+  } else {
+    res.render('hoge.ejs',{name:" "});
+  }
+})
+app.get("/download", (req,res)=>{
+  if(req.session.user){
+    var name1 = req.query.name
+    client.send(new GetObjectCommand({ Bucket: 'gazouserver', Key: name1 }))
+    .then(data => {
+      res.attachment(name1)
+      data.Body.pipe(res)
+    })
+  }else{
+    res.render('hoge.ejs',{name:"ログインしてください"})
+  }
+})
+
+
+
+
 
 //ID pass読み取り
 app.post("/top", (req,res)=>{
@@ -29,21 +78,33 @@ app.post("/top", (req,res)=>{
       throw err
     }
     if (results){
-      console.log(results);
+      //console.log(results);
     }
     var angou = crypto.createHash('sha256').update(pass).digest('hex')
     for (let i=0; i<results.length; ++i){
       if(id==results[i].user_id){   
          //ログイン処理 ユーザ1は123　ユーザー２はabc
         if(id==results[i].user_id && angou==results[i].password){
-          res.render('hoge.ejs',{name: "hi! " + results[i].name});
+          req.session.user={
+            user_id:results[i].user_id,
+            name:results[i].name
+          }
+          client.send(new ListObjectsCommand({ Bucket: 'gazouserver' }))
+            .then(data => {
+              const syousai = data.Contents.map(o => {return{ namae: o.Key, size: o.Size}})
+              res.render('index.ejs',{
+                name:"hi! "+ results[i].name,
+                id:syousai
+              })
+            })
+            
        }else{
-            res.render('hoge.ejs',{name: "id又はパスワードが間違っています"});
+        res.render('hoge.ejs',{name: "id又はパスワードが間違っています"});
        }
       }
     }
   })
   connection.end()
 });
-      
+
 app.listen(8080);
